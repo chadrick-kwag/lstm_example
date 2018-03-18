@@ -170,7 +170,9 @@ outputs, states = rnn.static_rnn(rnn_cell, x2,dtype=tf.float32)
 # we only want the last output
 multiply_weight = tf.matmul(outputs[-1], weights['out'],name="multiply_weight")
 
-pred =  tf.add(multiply_weight,biases['out'],name="final_output")
+pred2 =  tf.add(multiply_weight,biases['out'],name="final_output")
+
+pred = tf.nn.softmax(pred2)
 
 
 
