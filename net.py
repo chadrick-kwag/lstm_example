@@ -8,7 +8,7 @@ import collections
 
 # Parameters
 learning_rate = 0.001
-training_iters = 2
+training_iters = 50
 display_step = 1000
 n_input = 3
 input_size = 6 # x,y,w,h,e,m
@@ -17,6 +17,8 @@ output_size = 3 # it will be one hot among three possible values(left, right, no
 
 # number of units in RNN cell
 n_hidden = 512
+
+
 
 
 CURRENT_DIR = os.getcwd()
@@ -127,6 +129,17 @@ print("logs_path={}".format(logs_path))
 writer = tf.summary.FileWriter(logs_path)
 
 
+###
+# CREATING GRAPH
+#
+#
+# 
+# 
+# 
+### 
+
+
+
 
 # tf Graph input
 x = tf.placeholder("float", [None, n_input, 6])
@@ -140,19 +153,31 @@ biases = {
     'out': tf.Variable(tf.random_normal([output_size]))
 }
 
+batch_size = 2
+
 
 # def RNN(x, weights, biases):
 
 # pred = RNN(x, weights, biases)
-batch_size = 1
+
 
 
 # reshape to [1, n_input]
-x1 = tf.reshape(x, [ n_input,input_size],name="x_input_reshape")
+x1 = tf.reshape(x, [batch_size, n_input,input_size],name="x_input_reshape")
 
 # Generate a n_input-element sequence of inputs
 # (eg. [had] [a] [general] -> [20] [6] [33])
-x2 = tf.split(x1,n_input,0,name="x_input_split")
+x2 = tf.split(x1,n_input,1,name="x_input_split")
+
+x3 = tf.squeeze(x2)
+# x3 = None
+
+for index,tensor in enumerate(x2):
+    x2[index] = tf.squeeze(tensor)
+
+# initializer = tf.zeros([batch_size,input_size])
+# x4 = tf.scan(lambda a, x_i: tf.squeeze(x_i), x2, initializer=tf.constant(0,shape=[batch_size,input_size]) )
+x4=tf.Variable([0])
 
 # 2-layer LSTM, each layer has n_hidden units.
 # Average Accuracy= 95.20% at 50k iter
@@ -181,6 +206,8 @@ cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=pred, label
 optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(cost)
 
 # Model evaluation
+pred_max = tf.argmax(pred,1)
+label_max = tf.argmax(y,1)
 correct_pred = tf.equal(tf.argmax(pred,1), tf.argmax(y,1))
 accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
 
@@ -188,35 +215,65 @@ accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
 init = tf.global_variables_initializer()
 
 
+### 
+# 
+# 
+# setting the net input and output
+#
+# 
+###
 
 
-firstbatch=alldata[0:3]
+
+pythonlist_inputbatch=[]
+start_sequence_offset = 0
+for i in range(batch_size):
+    pythonlist_inputbatch.append(alldata[start_sequence_offset+i:start_sequence_offset+i+n_input])
+
+firstbatch=np.array(pythonlist_inputbatch)
 print("firsbatch shape={}".format(firstbatch.shape))
 
-firstbatch_input = np.reshape(firstbatch,[-1,n_input,input_size])
-print("firstbach input ={}".format(firstbatch_input.shape))
+batch_input = np.reshape(firstbatch,[-1,n_input,input_size])
+print("batch_input shape ={}".format(batch_input.shape))
+
+##
+# preparing the output
+# 
+#
+##
+
+onehot_converted_outputs=[]
+for i in range(batch_size):
+    out = outputlist[start_sequence_offset+n_input]
+    try:
+        ret = convert_to_onehot_vector(out)
+        onehot_converted_outputs.append(ret)
+    except Exception:
+        sys.exit(1)
+
 
 
 # coonvert single integer value of output to a one-hot vector
-raw_output_list = outputlist[0:3]
-onehot_vector_list = []
-for item in raw_output_list:
+# raw_output_list = outputlist[0:3]
+# onehot_vector_list = []
+# for item in raw_output_list:
     
-    try:
-        ret = convert_to_onehot_vector(item)
-        onehot_vector_list.append(ret)
-    except Exception:
-        sys.exit(1)
-print("onehot_vector_list = {}".format(onehot_vector_list))
+#     try:
+#         ret = convert_to_onehot_vector(item)
+#         onehot_vector_list.append(ret)
+#     except Exception:
+#         sys.exit(1)
+# print("onehot_vector_list = {}".format(onehot_vector_list))
 
+batch_output = np.reshape(onehot_converted_outputs,[-1,3])
 
+print("batch_output={}".format(batch_output))
 
+# firstbatch_output = np.reshape(onehot_vector_list,[-1,1,3])
 
-firstbatch_output = np.reshape(onehot_vector_list,[-1,1,3])
+# print("firstbatch_output = {}".format(firstbatch_output))
 
-print("firstbatch_output = {}".format(firstbatch_output))
-
-print("firstbatch output last = {}".format(firstbatch_output[-1]))
+# print("firstbatch output last = {}".format(firstbatch_output[-1]))
 
 
 
@@ -243,19 +300,36 @@ with tf.Session() as session:
 
     what_to_get_from_graph=[]
 
-    o_x1,o_x2,o_pred, o_outputs, o_states, o_multiply_weight,\
-    _,o_accuracy,o_cost = session.run([x1,x2,pred,outputs,states,multiply_weight,optimizer,accuracy,cost], feed_dict={x: firstbatch_input, y: firstbatch_output[-1]})
+    for step in range(training_iters):
 
-    print("x={}".format(firstbatch_input))
-    print("x1={}".format(o_x1))
-    print("x2={}".format(o_x2))
-    print("pred={}".format(o_pred))
-    print("o_outputs={}",format(o_outputs[-1]))
-    print("last o_output shape={}".format(o_outputs[-1].shape))
-    # print("outputs shape={}".format(np.array(outputs).shape))
+        print("== step: {}".format(step))
 
-    print("cost={}".format(o_cost))
-    print("accuracy={}".format(o_accuracy))
+        o_x1,o_x2,o_pred, o_outputs, o_states, o_multiply_weight,\
+        _,o_accuracy,o_cost, o_pred_max, o_label_max = session.run([x1,x2,pred,outputs,states,multiply_weight,optimizer,accuracy,cost,pred_max, label_max], feed_dict={x: batch_input, y: batch_output})
+
+        # print("x={}".format(batch_input))
+        # print("x1={}".format(o_x1))
+        # print("x2={}".format(o_x2))
+        # print("pred={}".format(o_pred))
+        
+        # print("o_outputs={}",format(o_outputs[-1]))
+        # print("last o_output shape={}".format(o_outputs[-1].shape))
+        # print("outputs shape={}".format(np.array(outputs).shape))
+
+        print("cost={}".format(o_cost))
+        print("accuracy={}".format(o_accuracy))
+        # print("pred_max ={}".format(o_pred_max))
+        # print("label max = {}".format(o_label_max))
+
+    # o_x1, o_x2, o_x3, o_x4  = session.run([x1,x2,x3,x4],feed_dict={x:batch_input,y:batch_output})
+
+    # print("x1={}".format(o_x1))
+    # print("x2={}".format(o_x2))
+    # # print("x2 shape={}".format(o_x2.shape))
+    # print("x3={}".format(o_x3))
+    # print("x3 shape = {}".format(o_x3.shape))
+    # print("x4={}".format(o_x4))
+
 
 
 
