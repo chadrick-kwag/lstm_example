@@ -4,24 +4,120 @@ import os,sys, json
 from tensorflow.contrib import rnn
 import random
 import collections
+import datetime
+import argparse
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--train',action='store_true')
+parser.add_argument('--test',action='store_true')
+parser.add_argument('--ckptdir',type=str)
+parser.add_argument('--ckptnum',type=str)
+
+
+args = parser.parse_args()
+ckptpath=None
+
+print(args)
+
+
+
+
+if args.train is False and args.test is  False:
+    print("no train and no test. nothing to do. abort")
+    sys.exit(0)
+elif args.train is True and args.test is True:
+    print("--train and --test cannot both exist at the same time. abort")
+    sys.exit(1)
+
+
+def check_ckpt_files_exist(ckpt_abs_path):
+    meta_file = "{}.meta".format(ckpt_abs_path)
+    index_file = "{}.index".format(ckpt_abs_path)
+    data_file = "{}.data-00000-of-00001".format(ckpt_abs_path)
+
+    if os.path.exists(meta_file) and os.path.exists(index_file) and os.path.exists(data_file):
+        return True
+    else:
+        return False
+
+
+if args.test:
+    if args.ckptdir is None or args.ckptnum is None:
+        print("ckptdir or ckptnum value doesn't exsit")
+        sys.exit(1)
+    # first see if the file exists assuming that the given parameter is absolute path
+    # the value of args.ckpt should be path/ckpt_number.ckpt 
+    # first check if the directory exists
+
+    # check if cpktdir exists
+    
+    if os.path.exists(args.ckptdir):
+        print("{} exists".format(args.ckptdir))
+    else:
+        # perhaps the input was a relative path. check existence after converting it
+        # to absolute path
+        ckptdir_abspath = os.path.join(os.getcwd(),args.ckptdir)
+        if(os.path.exists(ckptdir_abspath)):
+            print("cpkt exists in {}".format(ckptdir_abspath))
+            args.ckptdir = ckptdir_abspath
+        else:
+            print("cannot locate the ckpt in {}. abort".format(ckptdir_abspath))
+            sys.exit(1)
+    
+    # check if the ckptnum file exists
+    extensions_to_check=['.meta','.data-00000-of-00001','.index']
+
+    for check in extensions_to_check:
+
+        basename = "{}.ckpt{}".format(args.ckptnum,check)
+        filepath = os.path.join(args.ckptdir,basename)
+
+        if not os.path.exists(filepath):
+            print("{} doesn't exist. abort".format(filepath))
+            sys.exit(1)
+    
+    # if reach here it means that all ckpt checks has been passed
+    # global ckptpath
+
+    # we need the absolute path
+    ckptpath_temp = os.path.join(args.ckptdir,"{}.ckpt".format(args.ckptnum))
+    ckptpath = os.path.join(os.getcwd(),ckptpath_temp)
+
+
+# # testing up to args.parsing
+# print("end of parsing test")
+# sys.exit(0)
 
 
 # Parameters
 learning_rate = 0.001
-training_iters = 50
+training_iters = 3
 display_step = 1000
-n_input = 3
+n_input = 4
 input_size = 6 # x,y,w,h,e,m
 
 output_size = 3 # it will be one hot among three possible values(left, right, nothing)
 
 # number of units in RNN cell
-n_hidden = 512
+n_hidden = 3
+DATETIME_TIMESTAMP = datetime.datetime.now().strftime("%y%m%d_%H%M")
 
+# print(DATETIME_TIMESTAMP)
 
 
 
 CURRENT_DIR = os.getcwd()
+SAVE_DIR = os.path.join(CURRENT_DIR,"ckpt",DATETIME_TIMESTAMP)
+
+
+# if we are testing, then we don't need to create a save directory since we are not doing training
+if args.train is True:
+    os.makedirs(SAVE_DIR)
+
+
+
+
 
 def convert_to_onehot_vector(outputval):
     if outputval > 2 or outputval < 0:
@@ -153,7 +249,7 @@ biases = {
     'out': tf.Variable(tf.random_normal([output_size]))
 }
 
-batch_size = 2
+batch_size = 5
 
 
 # def RNN(x, weights, biases):
@@ -207,6 +303,7 @@ optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(cost
 
 # Model evaluation
 pred_max = tf.argmax(pred,1)
+max_ped = tf.reduce_max(pred,reduction_indices=[1])
 label_max = tf.argmax(y,1)
 correct_pred = tf.equal(tf.argmax(pred,1), tf.argmax(y,1))
 accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
@@ -214,6 +311,8 @@ accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
 # Initializing the variables
 init = tf.global_variables_initializer()
 
+
+saver = tf.train.Saver()
 
 ### 
 # 
@@ -281,12 +380,8 @@ print("batch_output={}".format(batch_output))
 
 # Launch the graph
 with tf.Session() as session:
-    session.run(init)
-    step = 0
-    offset = random.randint(0,n_input+1)
-    end_offset = n_input + 1
-    acc_total = 0
-    loss_total = 0
+    
+    
 
     writer.add_graph(session.graph)
     print("graph added to writer")
@@ -298,28 +393,53 @@ with tf.Session() as session:
     # _, acc, loss, onehot_pred = session.run([optimizer, accuracy, cost, pred], \
     #                                             feed_dict={x: firstbatch_input, y: firstbatch_output[-1]})
 
-    what_to_get_from_graph=[]
+    
 
-    for step in range(training_iters):
+    if args.test:
+        # global ckptpath
+        print("ckptpath={}".format(ckptpath))
+        saver.restore(session,ckptpath)
+        print("model restored")
 
-        print("== step: {}".format(step))
+        o_pred, o_outputs = session.run([pred,outputs],feed_dict={x: batch_input, y: batch_output})
 
-        o_x1,o_x2,o_pred, o_outputs, o_states, o_multiply_weight,\
-        _,o_accuracy,o_cost, o_pred_max, o_label_max = session.run([x1,x2,pred,outputs,states,multiply_weight,optimizer,accuracy,cost,pred_max, label_max], feed_dict={x: batch_input, y: batch_output})
-
-        # print("x={}".format(batch_input))
-        # print("x1={}".format(o_x1))
-        # print("x2={}".format(o_x2))
-        # print("pred={}".format(o_pred))
+        print("pred={}".format(o_pred))
+        print("outputs={}".format(o_outputs))
+    
+    if args.train:
         
-        # print("o_outputs={}",format(o_outputs[-1]))
-        # print("last o_output shape={}".format(o_outputs[-1].shape))
-        # print("outputs shape={}".format(np.array(outputs).shape))
+        # if we are training from scratch, we need to initialize the variables.
+        # TODO: of course, this is not acceptable when we want to train based on a pretrained ckpt.
+        session.run(init)
 
-        print("cost={}".format(o_cost))
-        print("accuracy={}".format(o_accuracy))
-        # print("pred_max ={}".format(o_pred_max))
-        # print("label max = {}".format(o_label_max))
+        for step in range(training_iters):
+
+            print("== step: {}".format(step))
+
+            o_x1,o_x2,o_pred, o_outputs, o_states, o_multiply_weight,\
+            _,o_accuracy,o_cost, o_pred_max, o_label_max, o_maxpred = session.run([x1,x2,pred,outputs,states,multiply_weight,optimizer,accuracy,cost,pred_max, label_max, max_ped], feed_dict={x: batch_input, y: batch_output})
+
+            # print("x={}".format(batch_input))
+            # print("x1={}".format(o_x1))
+            # print("x2={}".format(o_x2))
+            # print("pred={}".format(o_pred))
+            
+            # print("o_outputs={}",format(o_outputs[-1]))
+            # print("last o_output shape={}".format(o_outputs[-1].shape))
+            # print("outputs shape={}".format(np.array(outputs).shape))
+
+            print("cost={}".format(o_cost))
+            print("accuracy={}".format(o_accuracy))
+            print("max pred = {}".format(o_maxpred))
+            print("o_outputs={}".format(o_outputs))
+            print("o_states={}".format(o_states))
+            # print("pred_max ={}".format(o_pred_max))
+            # print("label max = {}".format(o_label_max))
+
+
+            save_path = saver.save(session,os.path.join(SAVE_DIR,"{:05d}.ckpt".format(step)))
+            print("ckpt saved in {}".format(save_path))
+
 
     # o_x1, o_x2, o_x3, o_x4  = session.run([x1,x2,x3,x4],feed_dict={x:batch_input,y:batch_output})
 
